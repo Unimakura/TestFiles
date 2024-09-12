@@ -23,17 +23,24 @@ public class AudioManager : MonoBehaviour
 
     IEnumerator InitializeAndStartRecording()
     {
+        Debug.Log("Initializing audio recording...");
+
         // Request microphone permission
         if (!Permission.HasUserAuthorizedPermission(Permission.Microphone))
         {
+            Debug.Log("Requesting microphone permission...");
             Permission.RequestUserPermission(Permission.Microphone);
             yield return new WaitUntil(() => Permission.HasUserAuthorizedPermission(Permission.Microphone));
         }
 
+        Debug.Log("Microphone permission status: " + Permission.HasUserAuthorizedPermission(Permission.Microphone));
+
         bool initialized = AudioRecorderInterface.InitializeAudioRecorder();
         if (initialized)
         {
+            Debug.Log("Audio recorder initialized successfully");
             AudioRecorderInterface.StartRecording();
+            Debug.Log("Started recording");
             StartCoroutine(ProcessAudio());
         }
         else
@@ -44,9 +51,12 @@ public class AudioManager : MonoBehaviour
 
     IEnumerator ProcessAudio()
     {
+        Debug.Log("Starting audio processing...");
         while (true)
         {
             int samplesRead = AudioRecorderInterface.ReadAudioData(audioBuffer);
+            Debug.Log($"Samples read: {samplesRead}");
+
             if (samplesRead > 0)
             {
                 // Calculate audio level
@@ -56,6 +66,11 @@ public class AudioManager : MonoBehaviour
                     sum += Mathf.Abs(audioBuffer[i] / 32768f);
                 }
                 currentAudioLevel = sum / samplesRead;
+
+                Debug.Log($"Raw audio level: {currentAudioLevel}");
+
+                // Apply some amplification to make the level more visible
+                currentAudioLevel = Mathf.Clamp01(currentAudioLevel * 5f);
 
                 // Update audio level display
                 if (audioLevelDisplay != null)
@@ -78,39 +93,112 @@ public class AudioManager : MonoBehaviour
                 audioSource.clip = clip;
                 audioSource.Play();
             }
+            else
+            {
+                Debug.LogWarning("No audio data read");
+            }
+
             yield return null;
         }
     }
 
     void OnDestroy()
     {
+        Debug.Log("Stopping and releasing audio recorder");
         AudioRecorderInterface.StopRecording();
         AudioRecorderInterface.Release();
     }
 }
 
-// AudioLevelDisplay.cs
+// AudioRecorderInterface.cs
 using UnityEngine;
-using UnityEngine.UI;
+using System.Runtime.InteropServices;
 
-public class AudioLevelDisplay : MonoBehaviour
+public class AudioRecorderInterface : MonoBehaviour
 {
-    public Image levelBar;
-    public Text levelText;
+    private const string PluginName = "com.example.audiorecorder.AudioRecorderPlugin";
+    private static AndroidJavaObject plugin;
 
-    public void UpdateAudioLevel(float level)
+    private static AndroidJavaObject Plugin
     {
-        // Update UI
-        if (levelBar != null)
+        get
         {
-            levelBar.fillAmount = level;
+            if (plugin == null)
+            {
+                Debug.Log("Initializing AudioRecorderPlugin");
+                plugin = new AndroidJavaObject(PluginName);
+                if (plugin == null)
+                {
+                    Debug.LogError("Failed to create AudioRecorderPlugin instance");
+                }
+                else
+                {
+                    Debug.Log("AudioRecorderPlugin instance created successfully");
+                }
+            }
+            return plugin;
         }
-        
-        if (levelText != null)
+    }
+
+    public static bool InitializeAudioRecorder()
+    {
+        if (Application.platform == RuntimePlatform.Android)
         {
-            levelText.text = $"Audio Level: {level:F2}";
+            Debug.Log("Calling initializeAudioRecorder on Android");
+            bool result = Plugin.Call<bool>("initializeAudioRecorder");
+            Debug.Log($"initializeAudioRecorder result: {result}");
+            return result;
         }
-        
-        Debug.Log($"Current Audio Level: {level}");
+        Debug.LogWarning("Not on Android platform, audio recording not supported");
+        return false;
+    }
+
+    public static void StartRecording()
+    {
+        if (Application.platform == RuntimePlatform.Android)
+        {
+            Debug.Log("Starting recording on Android");
+            Plugin.Call("startRecording");
+        }
+    }
+
+    public static void StopRecording()
+    {
+        if (Application.platform == RuntimePlatform.Android)
+        {
+            Debug.Log("Stopping recording on Android");
+            Plugin.Call("stopRecording");
+        }
+    }
+
+    public static int ReadAudioData(short[] buffer)
+    {
+        if (Application.platform == RuntimePlatform.Android)
+        {
+            int samplesRead = Plugin.Call<int>("readAudioData", buffer);
+            Debug.Log($"Read {samplesRead} samples from Android");
+            return samplesRead;
+        }
+        return 0;
+    }
+
+    public static void Release()
+    {
+        if (Application.platform == RuntimePlatform.Android)
+        {
+            Debug.Log("Releasing AudioRecorder on Android");
+            Plugin.Call("release");
+        }
+    }
+
+    public static int GetAudioSessionId()
+    {
+        if (Application.platform == RuntimePlatform.Android)
+        {
+            int sessionId = Plugin.Call<int>("getAudioSessionId");
+            Debug.Log($"Got audio session ID: {sessionId}");
+            return sessionId;
+        }
+        return -1;
     }
 }
