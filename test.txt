@@ -1,149 +1,3 @@
-// AudioRecorderPlugin.java
-package com.example.audiorecorder;
-
-import android.media.AudioFormat;
-import android.media.AudioRecord;
-import android.media.MediaRecorder;
-import android.util.Log;
-
-public class AudioRecorderPlugin {
-    private static final String TAG = "AudioRecorderPlugin";
-    private static final int SAMPLE_RATE = 44100;
-    private static final int CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO;
-    private static final int AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT;
-
-    private AudioRecord audioRecord;
-    private boolean isRecording = false;
-    private int bufferSize;
-
-    public boolean initializeAudioRecorder() {
-        bufferSize = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT);
-        if (bufferSize == AudioRecord.ERROR || bufferSize == AudioRecord.ERROR_BAD_VALUE) {
-            Log.e(TAG, "Invalid buffer size");
-            return false;
-        }
-
-        audioRecord = new AudioRecord(MediaRecorder.AudioSource.VOICE_COMMUNICATION,
-                SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT, bufferSize);
-
-        if (audioRecord.getState() != AudioRecord.STATE_INITIALIZED) {
-            Log.e(TAG, "AudioRecord initialization failed");
-            return false;
-        }
-
-        return true;
-    }
-
-    public void startRecording() {
-        if (audioRecord != null && !isRecording) {
-            audioRecord.startRecording();
-            isRecording = true;
-            Log.d(TAG, "Recording started");
-        }
-    }
-
-    public void stopRecording() {
-        if (audioRecord != null && isRecording) {
-            audioRecord.stop();
-            isRecording = false;
-            Log.d(TAG, "Recording stopped");
-        }
-    }
-
-    public int readAudioData(short[] audioBuffer) {
-        if (audioRecord != null && isRecording) {
-            return audioRecord.read(audioBuffer, 0, audioBuffer.length);
-        }
-        return 0;
-    }
-
-    public void release() {
-        if (audioRecord != null) {
-            audioRecord.release();
-            audioRecord = null;
-            isRecording = false;
-            Log.d(TAG, "AudioRecord released");
-        }
-    }
-
-    public int getAudioSessionId() {
-        return audioRecord != null ? audioRecord.getAudioSessionId() : -1;
-    }
-}
-
-// AudioRecorderInterface.cs
-using UnityEngine;
-using System.Runtime.InteropServices;
-
-public class AudioRecorderInterface : MonoBehaviour
-{
-    private const string PluginName = "com.example.audiorecorder.AudioRecorderPlugin";
-    private static AndroidJavaObject plugin;
-
-    private static AndroidJavaObject Plugin
-    {
-        get
-        {
-            if (plugin == null)
-            {
-                plugin = new AndroidJavaObject(PluginName);
-            }
-            return plugin;
-        }
-    }
-
-    public static bool InitializeAudioRecorder()
-    {
-        if (Application.platform == RuntimePlatform.Android)
-        {
-            return Plugin.Call<bool>("initializeAudioRecorder");
-        }
-        return false;
-    }
-
-    public static void StartRecording()
-    {
-        if (Application.platform == RuntimePlatform.Android)
-        {
-            Plugin.Call("startRecording");
-        }
-    }
-
-    public static void StopRecording()
-    {
-        if (Application.platform == RuntimePlatform.Android)
-        {
-            Plugin.Call("stopRecording");
-        }
-    }
-
-    public static int ReadAudioData(short[] buffer)
-    {
-        if (Application.platform == RuntimePlatform.Android)
-        {
-            return Plugin.Call<int>("readAudioData", buffer);
-        }
-        return 0;
-    }
-
-    public static void Release()
-    {
-        if (Application.platform == RuntimePlatform.Android)
-        {
-            Plugin.Call("release");
-        }
-    }
-
-    public static int GetAudioSessionId()
-    {
-        if (Application.platform == RuntimePlatform.Android)
-        {
-            return Plugin.Call<int>("getAudioSessionId");
-        }
-        return -1;
-    }
-}
-
 // AudioManager.cs
 using UnityEngine;
 using System.Collections;
@@ -153,6 +7,11 @@ public class AudioManager : MonoBehaviour
     private AudioSource audioSource;
     private short[] audioBuffer;
     private const int BufferSize = 4096;
+    
+    [SerializeField]
+    private AudioLevelDisplay audioLevelDisplay;
+
+    private float currentAudioLevel = 0f;
 
     void Start()
     {
@@ -190,6 +49,20 @@ public class AudioManager : MonoBehaviour
             int samplesRead = AudioRecorderInterface.ReadAudioData(audioBuffer);
             if (samplesRead > 0)
             {
+                // Calculate audio level
+                float sum = 0f;
+                for (int i = 0; i < samplesRead; i++)
+                {
+                    sum += Mathf.Abs(audioBuffer[i] / 32768f);
+                }
+                currentAudioLevel = sum / samplesRead;
+
+                // Update audio level display
+                if (audioLevelDisplay != null)
+                {
+                    audioLevelDisplay.UpdateAudioLevel(currentAudioLevel);
+                }
+
                 // Convert short array to float array
                 float[] floatBuffer = new float[samplesRead];
                 for (int i = 0; i < samplesRead; i++)
@@ -213,5 +86,31 @@ public class AudioManager : MonoBehaviour
     {
         AudioRecorderInterface.StopRecording();
         AudioRecorderInterface.Release();
+    }
+}
+
+// AudioLevelDisplay.cs
+using UnityEngine;
+using UnityEngine.UI;
+
+public class AudioLevelDisplay : MonoBehaviour
+{
+    public Image levelBar;
+    public Text levelText;
+
+    public void UpdateAudioLevel(float level)
+    {
+        // Update UI
+        if (levelBar != null)
+        {
+            levelBar.fillAmount = level;
+        }
+        
+        if (levelText != null)
+        {
+            levelText.text = $"Audio Level: {level:F2}";
+        }
+        
+        Debug.Log($"Current Audio Level: {level}");
     }
 }
