@@ -53,23 +53,22 @@ public class AudioRecorderPlugin {
         }
     }
 
-    public int readAudioData(short[] audioBuffer) {
+    public short[] readAudioData() {
         if (audioRecord != null && isRecording) {
-            int samplesRead = audioRecord.read(audioBuffer, 0, audioBuffer.length);
+            short[] buffer = new short[bufferSize];
+            int samplesRead = audioRecord.read(buffer, 0, bufferSize);
             Log.d(TAG, "Read " + samplesRead + " samples");
             
             // Log the first few samples for debugging
-            if (samplesRead > 0) {
-                StringBuilder sb = new StringBuilder();
-                for (int i = 0; i < Math.min(10, samplesRead); i++) {
-                    sb.append(audioBuffer[i]).append(", ");
-                }
-                Log.d(TAG, "First few samples: " + sb.toString());
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < Math.min(10, samplesRead); i++) {
+                sb.append(buffer[i]).append(", ");
             }
+            Log.d(TAG, "First few samples: " + sb.toString());
             
-            return samplesRead;
+            return buffer;
         }
-        return 0;
+        return new short[0];
     }
 
     public void release() {
@@ -83,127 +82,6 @@ public class AudioRecorderPlugin {
 
     public int getAudioSessionId() {
         return audioRecord != null ? audioRecord.getAudioSessionId() : -1;
-    }
-}
-
-// AudioManager.cs
-using UnityEngine;
-using System.Collections;
-using System;
-
-public class AudioManager : MonoBehaviour
-{
-    private AudioSource audioSource;
-    private short[] audioBuffer;
-    private const int BufferSize = 4096;
-    
-    [SerializeField]
-    private AudioLevelDisplay audioLevelDisplay;
-
-    private float currentAudioLevel = 0f;
-
-    void Start()
-    {
-        audioSource = GetComponent<AudioSource>();
-        audioBuffer = new short[BufferSize];
-
-        StartCoroutine(InitializeAndStartRecording());
-    }
-
-    IEnumerator InitializeAndStartRecording()
-    {
-        Debug.Log("Initializing audio recording...");
-
-        // Request microphone permission
-        if (!Permission.HasUserAuthorizedPermission(Permission.Microphone))
-        {
-            Debug.Log("Requesting microphone permission...");
-            Permission.RequestUserPermission(Permission.Microphone);
-            yield return new WaitUntil(() => Permission.HasUserAuthorizedPermission(Permission.Microphone));
-        }
-
-        Debug.Log("Microphone permission status: " + Permission.HasUserAuthorizedPermission(Permission.Microphone));
-
-        bool initialized = AudioRecorderInterface.InitializeAudioRecorder();
-        if (initialized)
-        {
-            Debug.Log("Audio recorder initialized successfully");
-            AudioRecorderInterface.StartRecording();
-            Debug.Log("Started recording");
-            StartCoroutine(ProcessAudio());
-        }
-        else
-        {
-            Debug.LogError("Failed to initialize audio recorder");
-        }
-    }
-
-    IEnumerator ProcessAudio()
-    {
-        Debug.Log("Starting audio processing...");
-        while (true)
-        {
-            int samplesRead = AudioRecorderInterface.ReadAudioData(audioBuffer);
-            Debug.Log($"Samples read: {samplesRead}");
-
-            if (samplesRead > 0)
-            {
-                // Log the first few samples
-                string sampleLog = "First few samples: ";
-                for (int i = 0; i < Math.Min(10, samplesRead); i++)
-                {
-                    sampleLog += audioBuffer[i] + ", ";
-                }
-                Debug.Log(sampleLog);
-
-                // Calculate audio level
-                float sum = 0f;
-                for (int i = 0; i < samplesRead; i++)
-                {
-                    sum += Mathf.Abs(audioBuffer[i] / 32768f);
-                }
-                currentAudioLevel = sum / samplesRead;
-
-                Debug.Log($"Raw audio level: {currentAudioLevel}");
-
-                // Apply some amplification to make the level more visible
-                currentAudioLevel = Mathf.Clamp01(currentAudioLevel * 5f);
-
-                // Update audio level display
-                if (audioLevelDisplay != null)
-                {
-                    audioLevelDisplay.UpdateAudioLevel(currentAudioLevel);
-                }
-
-                // Convert short array to float array
-                float[] floatBuffer = new float[samplesRead];
-                for (int i = 0; i < samplesRead; i++)
-                {
-                    floatBuffer[i] = audioBuffer[i] / 32768f;
-                }
-
-                // Create AudioClip and set data
-                AudioClip clip = AudioClip.Create("RecordedAudio", samplesRead, 1, 44100, false);
-                clip.SetData(floatBuffer, 0);
-
-                // Play the audio
-                audioSource.clip = clip;
-                audioSource.Play();
-            }
-            else
-            {
-                Debug.LogWarning("No audio data read");
-            }
-
-            yield return null;
-        }
-    }
-
-    void OnDestroy()
-    {
-        Debug.Log("Stopping and releasing audio recorder");
-        AudioRecorderInterface.StopRecording();
-        AudioRecorderInterface.Release();
     }
 }
 
@@ -268,15 +146,21 @@ public class AudioRecorderInterface : MonoBehaviour
         }
     }
 
-    public static int ReadAudioData(short[] buffer)
+    public static short[] ReadAudioData()
     {
         if (Application.platform == RuntimePlatform.Android)
         {
-            int samplesRead = Plugin.Call<int>("readAudioData", buffer);
-            Debug.Log($"Read {samplesRead} samples from Android");
-            return samplesRead;
+            short[] samples = Plugin.Call<short[]>("readAudioData");
+            Debug.Log($"Read {samples.Length} samples from Android");
+            string sampleLog = "First few samples: ";
+            for (int i = 0; i < Mathf.Min(10, samples.Length); i++)
+            {
+                sampleLog += samples[i] + ", ";
+            }
+            Debug.Log(sampleLog);
+            return samples;
         }
-        return 0;
+        return new short[0];
     }
 
     public static void Release()
@@ -297,5 +181,117 @@ public class AudioRecorderInterface : MonoBehaviour
             return sessionId;
         }
         return -1;
+    }
+}
+
+// AudioManager.cs
+using UnityEngine;
+using System.Collections;
+using System;
+
+public class AudioManager : MonoBehaviour
+{
+    private AudioSource audioSource;
+    private const int BufferSize = 4096;
+    
+    [SerializeField]
+    private AudioLevelDisplay audioLevelDisplay;
+
+    private float currentAudioLevel = 0f;
+
+    void Start()
+    {
+        audioSource = GetComponent<AudioSource>();
+
+        StartCoroutine(InitializeAndStartRecording());
+    }
+
+    IEnumerator InitializeAndStartRecording()
+    {
+        Debug.Log("Initializing audio recording...");
+
+        // Request microphone permission
+        if (!Permission.HasUserAuthorizedPermission(Permission.Microphone))
+        {
+            Debug.Log("Requesting microphone permission...");
+            Permission.RequestUserPermission(Permission.Microphone);
+            yield return new WaitUntil(() => Permission.HasUserAuthorizedPermission(Permission.Microphone));
+        }
+
+        Debug.Log("Microphone permission status: " + Permission.HasUserAuthorizedPermission(Permission.Microphone));
+
+        bool initialized = AudioRecorderInterface.InitializeAudioRecorder();
+        if (initialized)
+        {
+            Debug.Log("Audio recorder initialized successfully");
+            AudioRecorderInterface.StartRecording();
+            Debug.Log("Started recording");
+            StartCoroutine(ProcessAudio());
+        }
+        else
+        {
+            Debug.LogError("Failed to initialize audio recorder");
+        }
+    }
+
+    IEnumerator ProcessAudio()
+    {
+        Debug.Log("Starting audio processing...");
+        while (true)
+        {
+            short[] audioBuffer = AudioRecorderInterface.ReadAudioData();
+            int samplesRead = audioBuffer.Length;
+            Debug.Log($"Samples read: {samplesRead}");
+
+            if (samplesRead > 0)
+            {
+                // Calculate audio level
+                float sum = 0f;
+                for (int i = 0; i < samplesRead; i++)
+                {
+                    sum += Mathf.Abs(audioBuffer[i] / 32768f);
+                }
+                currentAudioLevel = sum / samplesRead;
+
+                Debug.Log($"Raw audio level: {currentAudioLevel}");
+
+                // Apply some amplification to make the level more visible
+                currentAudioLevel = Mathf.Clamp01(currentAudioLevel * 5f);
+
+                // Update audio level display
+                if (audioLevelDisplay != null)
+                {
+                    audioLevelDisplay.UpdateAudioLevel(currentAudioLevel);
+                }
+
+                // Convert short array to float array
+                float[] floatBuffer = new float[samplesRead];
+                for (int i = 0; i < samplesRead; i++)
+                {
+                    floatBuffer[i] = audioBuffer[i] / 32768f;
+                }
+
+                // Create AudioClip and set data
+                AudioClip clip = AudioClip.Create("RecordedAudio", samplesRead, 1, 44100, false);
+                clip.SetData(floatBuffer, 0);
+
+                // Play the audio
+                audioSource.clip = clip;
+                audioSource.Play();
+            }
+            else
+            {
+                Debug.LogWarning("No audio data read");
+            }
+
+            yield return null;
+        }
+    }
+
+    void OnDestroy()
+    {
+        Debug.Log("Stopping and releasing audio recorder");
+        AudioRecorderInterface.StopRecording();
+        AudioRecorderInterface.Release();
     }
 }
