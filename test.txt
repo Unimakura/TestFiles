@@ -6,7 +6,7 @@ public class AudioManager : MonoBehaviour
     private AudioSource audioSource;
     private const int BufferSize = 4096;
     private const int SampleRate = 44100;
-
+    
     [SerializeField]
     private AudioLevelDisplay audioLevelDisplay;
 
@@ -23,7 +23,17 @@ public class AudioManager : MonoBehaviour
 
     IEnumerator InitializeAndStartRecording()
     {
-        // マイクの権限リクエスト（既存のコードと同じ）
+        Debug.Log("Initializing audio recording...");
+
+        // Request microphone permission
+        if (!Permission.HasUserAuthorizedPermission(Permission.Microphone))
+        {
+            Debug.Log("Requesting microphone permission...");
+            Permission.RequestUserPermission(Permission.Microphone);
+            yield return new WaitUntil(() => Permission.HasUserAuthorizedPermission(Permission.Microphone));
+        }
+
+        Debug.Log("Microphone permission status: " + Permission.HasUserAuthorizedPermission(Permission.Microphone));
 
         bool initialized = AudioRecorderInterface.InitializeAudioRecorder();
         if (initialized)
@@ -37,7 +47,6 @@ public class AudioManager : MonoBehaviour
         {
             Debug.LogError("Failed to initialize audio recorder");
         }
-        yield return null;
     }
 
     void CreateAndSetAudioClip()
