@@ -1,5 +1,6 @@
 using UnityEngine;
 using System.Collections;
+using System.Threading;
 
 public class AudioManager : MonoBehaviour
 {
@@ -13,6 +14,8 @@ public class AudioManager : MonoBehaviour
     private float currentAudioLevel = 0f;
     private bool isRecorderInitialized = false;
     private bool isRecording = false;
+    private Thread audioProcessingThread;
+    private volatile bool shouldStopThread = false;
 
     void Start()
     {
@@ -25,7 +28,32 @@ public class AudioManager : MonoBehaviour
 
     IEnumerator InitializeAndStartRecording()
     {
-        // 既存のコードは変更なし
+        Debug.Log("Initializing audio recording...");
+
+        // Request microphone permission
+        if (!Permission.HasUserAuthorizedPermission(Permission.Microphone))
+        {
+            Debug.Log("Requesting microphone permission...");
+            Permission.RequestUserPermission(Permission.Microphone);
+            yield return new WaitUntil(() => Permission.HasUserAuthorizedPermission(Permission.Microphone));
+        }
+
+        Debug.Log("Microphone permission status: " + Permission.HasUserAuthorizedPermission(Permission.Microphone));
+
+        isRecorderInitialized = AudioRecorderInterface.InitializeAudioRecorder();
+        if (isRecorderInitialized)
+        {
+            Debug.Log("Audio recorder initialized successfully");
+            AudioRecorderInterface.StartRecording();
+            isRecording = true;
+            Debug.Log("Started recording");
+            CreateAndSetAudioClip();
+            StartAudioProcessingThread();
+        }
+        else
+        {
+            Debug.LogError("Failed to initialize audio recorder");
+        }
     }
 
     void CreateAndSetAudioClip()
@@ -35,20 +63,33 @@ public class AudioManager : MonoBehaviour
         audioSource.Play();
     }
 
-    void OnAudioRead(float[] data)
+    void StartAudioProcessingThread()
     {
-        if (!isRecorderInitialized || !isRecording)
-        {
-            Debug.LogWarning("Audio recorder is not initialized or not recording");
-            return;
-        }
+        shouldStopThread = false;
+        audioProcessingThread = new Thread(AudioProcessingLoop);
+        audioProcessingThread.Start();
+    }
 
+    void AudioProcessingLoop()
+    {
+        while (!shouldStopThread)
+        {
+            if (isRecorderInitialized && isRecording)
+            {
+                ProcessAudioData();
+            }
+            Thread.Sleep(10); // 調整可能な待機時間
+        }
+    }
+
+    void ProcessAudioData()
+    {
         try
         {
             short[] audioBuffer = AudioRecorderInterface.ReadAudioData();
             if (audioBuffer == null)
             {
-                Debug.LogError("AudioBuffer is null");
+                Debug.LogWarning("AudioBuffer is null");
                 return;
             }
 
@@ -57,46 +98,49 @@ public class AudioManager : MonoBehaviour
 
             if (samplesRead > 0)
             {
-                int copyLength = Mathf.Min(samplesRead, data.Length);
-                for (int i = 0; i < copyLength; i++)
-                {
-                    data[i] = audioBuffer[i] / 32768f;
-                }
-
-                // オーディオレベルの計算
-                float sum = 0f;
-                for (int i = 0; i < copyLength; i++)
-                {
-                    sum += Mathf.Abs(data[i]);
-                }
-                currentAudioLevel = sum / copyLength;
-                currentAudioLevel = Mathf.Clamp01(currentAudioLevel * 5f);
-
-                if (audioLevelDisplay != null)
-                {
-                    audioLevelDisplay.UpdateAudioLevel(currentAudioLevel);
-                }
-            }
-            else
-            {
-                Debug.LogWarning("No audio data read");
+                // オーディオデータの処理（必要に応じて）
+                UpdateAudioLevel(audioBuffer, samplesRead);
             }
         }
         catch (System.Exception e)
         {
-            Debug.LogError($"Exception in OnAudioRead: {e.Message}\n{e.StackTrace}");
-            RestartRecording();
+            Debug.LogError($"Exception in ProcessAudioData: {e.Message}\n{e.StackTrace}");
         }
     }
 
-    void RestartRecording()
+    void UpdateAudioLevel(short[] audioBuffer, int samplesRead)
     {
-        StopRecording();
-        StartCoroutine(InitializeAndStartRecording());
+        float sum = 0f;
+        for (int i = 0; i < samplesRead; i++)
+        {
+            sum += Mathf.Abs(audioBuffer[i] / 32768f);
+        }
+        currentAudioLevel = sum / samplesRead;
+        currentAudioLevel = Mathf.Clamp01(currentAudioLevel * 5f);
+
+        // メインスレッドでUIを更新
+        UnityMainThreadDispatcher.Instance().Enqueue(() =>
+        {
+            if (audioLevelDisplay != null)
+            {
+                audioLevelDisplay.UpdateAudioLevel(currentAudioLevel);
+            }
+        });
     }
 
-    void StopRecording()
+    void OnAudioRead(float[] data)
     {
+        // このメソッドは空のままにし、AudioProcessingLoopでデータを処理します
+    }
+
+    void OnDestroy()
+    {
+        shouldStopThread = true;
+        if (audioProcessingThread != null && audioProcessingThread.IsAlive)
+        {
+            audioProcessingThread.Join(1000); // 最大1秒待機
+        }
+
         if (isRecording)
         {
             AudioRecorderInterface.StopRecording();
@@ -107,10 +151,5 @@ public class AudioManager : MonoBehaviour
             AudioRecorderInterface.Release();
             isRecorderInitialized = false;
         }
-    }
-
-    void OnDestroy()
-    {
-        StopRecording();
     }
 }
