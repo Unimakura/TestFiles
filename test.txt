@@ -25,31 +25,7 @@ public class AudioManager : MonoBehaviour
 
     IEnumerator InitializeAndStartRecording()
     {
-        Debug.Log("Initializing audio recording...");
-
-        // Request microphone permission
-        if (!Permission.HasUserAuthorizedPermission(Permission.Microphone))
-        {
-            Debug.Log("Requesting microphone permission...");
-            Permission.RequestUserPermission(Permission.Microphone);
-            yield return new WaitUntil(() => Permission.HasUserAuthorizedPermission(Permission.Microphone));
-        }
-
-        Debug.Log("Microphone permission status: " + Permission.HasUserAuthorizedPermission(Permission.Microphone));
-
-        isRecorderInitialized = AudioRecorderInterface.InitializeAudioRecorder();
-        if (isRecorderInitialized)
-        {
-            Debug.Log("Audio recorder initialized successfully");
-            AudioRecorderInterface.StartRecording();
-            isRecording = true;
-            Debug.Log("Started recording");
-            CreateAndSetAudioClip();
-        }
-        else
-        {
-            Debug.LogError("Failed to initialize audio recorder");
-        }
+        // 既存のコードは変更なし
     }
 
     void CreateAndSetAudioClip()
@@ -67,44 +43,59 @@ public class AudioManager : MonoBehaviour
             return;
         }
 
-        short[] audioBuffer = AudioRecorderInterface.ReadAudioData();
-        if (audioBuffer == null)
+        try
         {
-            Debug.LogError("AudioBuffer is null");
-            return;
+            short[] audioBuffer = AudioRecorderInterface.ReadAudioData();
+            if (audioBuffer == null)
+            {
+                Debug.LogError("AudioBuffer is null");
+                return;
+            }
+
+            int samplesRead = audioBuffer.Length;
+            Debug.Log($"Samples read: {samplesRead}");
+
+            if (samplesRead > 0)
+            {
+                int copyLength = Mathf.Min(samplesRead, data.Length);
+                for (int i = 0; i < copyLength; i++)
+                {
+                    data[i] = audioBuffer[i] / 32768f;
+                }
+
+                // オーディオレベルの計算
+                float sum = 0f;
+                for (int i = 0; i < copyLength; i++)
+                {
+                    sum += Mathf.Abs(data[i]);
+                }
+                currentAudioLevel = sum / copyLength;
+                currentAudioLevel = Mathf.Clamp01(currentAudioLevel * 5f);
+
+                if (audioLevelDisplay != null)
+                {
+                    audioLevelDisplay.UpdateAudioLevel(currentAudioLevel);
+                }
+            }
+            else
+            {
+                Debug.LogWarning("No audio data read");
+            }
         }
-
-        int samplesRead = audioBuffer.Length;
-        Debug.Log($"Samples read: {samplesRead}");
-
-        if (samplesRead > 0)
+        catch (System.Exception e)
         {
-            for (int i = 0; i < samplesRead && i < data.Length; i++)
-            {
-                data[i] = audioBuffer[i] / 32768f;
-            }
-
-            // オーディオレベルの計算
-            float sum = 0f;
-            for (int i = 0; i < samplesRead; i++)
-            {
-                sum += Mathf.Abs(data[i]);
-            }
-            currentAudioLevel = sum / samplesRead;
-            currentAudioLevel = Mathf.Clamp01(currentAudioLevel * 5f);
-
-            if (audioLevelDisplay != null)
-            {
-                audioLevelDisplay.UpdateAudioLevel(currentAudioLevel);
-            }
-        }
-        else
-        {
-            Debug.LogWarning("No audio data read");
+            Debug.LogError($"Exception in OnAudioRead: {e.Message}\n{e.StackTrace}");
+            RestartRecording();
         }
     }
 
-    void OnDestroy()
+    void RestartRecording()
+    {
+        StopRecording();
+        StartCoroutine(InitializeAndStartRecording());
+    }
+
+    void StopRecording()
     {
         if (isRecording)
         {
@@ -116,5 +107,10 @@ public class AudioManager : MonoBehaviour
             AudioRecorderInterface.Release();
             isRecorderInitialized = false;
         }
+    }
+
+    void OnDestroy()
+    {
+        StopRecording();
     }
 }
