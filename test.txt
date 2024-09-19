@@ -13,7 +13,6 @@ public class AudioManager : MonoBehaviour
     private AudioLevelDisplay audioLevelDisplay;
 
     private float currentAudioLevel = 0f;
-    private int position = 0;
 
     void Start()
     {
@@ -22,7 +21,10 @@ public class AudioManager : MonoBehaviour
         audioSource.playOnAwake = false;
 
         audioSender = gameObject.AddComponent<AudioStreamSender>();
-        audioSender.source = audioSource;
+        
+        // AudioSourceTrack を作成して AudioStreamSender に設定
+        var audioSourceTrack = new AudioStreamTrack(audioSource);
+        audioSender.Track = audioSourceTrack;
 
         StartCoroutine(InitializeAndStartRecording());
     }
