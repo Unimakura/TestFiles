@@ -1,6 +1,7 @@
 using UnityEngine;
 using System.Collections;
 using System.Threading;
+using UnityEngine.Android;
 
 public class AudioManager : MonoBehaviour
 {
@@ -98,7 +99,6 @@ public class AudioManager : MonoBehaviour
 
             if (samplesRead > 0)
             {
-                // オーディオデータの処理（必要に応じて）
                 UpdateAudioLevel(audioBuffer, samplesRead);
             }
         }
@@ -117,20 +117,32 @@ public class AudioManager : MonoBehaviour
         }
         currentAudioLevel = sum / samplesRead;
         currentAudioLevel = Mathf.Clamp01(currentAudioLevel * 5f);
-
-        // メインスレッドでUIを更新
-        UnityMainThreadDispatcher.Instance().Enqueue(() =>
-        {
-            if (audioLevelDisplay != null)
-            {
-                audioLevelDisplay.UpdateAudioLevel(currentAudioLevel);
-            }
-        });
     }
 
     void OnAudioRead(float[] data)
     {
-        // このメソッドは空のままにし、AudioProcessingLoopでデータを処理します
+        if (!isRecorderInitialized || !isRecording)
+        {
+            return;
+        }
+
+        short[] audioBuffer = AudioRecorderInterface.ReadAudioData();
+        if (audioBuffer == null || audioBuffer.Length == 0)
+        {
+            return;
+        }
+
+        int copyLength = Mathf.Min(audioBuffer.Length, data.Length);
+        for (int i = 0; i < copyLength; i++)
+        {
+            data[i] = audioBuffer[i] / 32768f;
+        }
+
+        // AudioLevelDisplayの更新（メインスレッドで安全に実行できる）
+        if (audioLevelDisplay != null)
+        {
+            audioLevelDisplay.UpdateAudioLevel(currentAudioLevel);
+        }
     }
 
     void OnDestroy()
