@@ -11,6 +11,8 @@ public class AudioManager : MonoBehaviour
     private AudioLevelDisplay audioLevelDisplay;
 
     private float currentAudioLevel = 0f;
+    private bool isRecorderInitialized = false;
+    private bool isRecording = false;
 
     void Start()
     {
@@ -35,11 +37,12 @@ public class AudioManager : MonoBehaviour
 
         Debug.Log("Microphone permission status: " + Permission.HasUserAuthorizedPermission(Permission.Microphone));
 
-        bool initialized = AudioRecorderInterface.InitializeAudioRecorder();
-        if (initialized)
+        isRecorderInitialized = AudioRecorderInterface.InitializeAudioRecorder();
+        if (isRecorderInitialized)
         {
             Debug.Log("Audio recorder initialized successfully");
             AudioRecorderInterface.StartRecording();
+            isRecording = true;
             Debug.Log("Started recording");
             CreateAndSetAudioClip();
         }
@@ -58,8 +61,21 @@ public class AudioManager : MonoBehaviour
 
     void OnAudioRead(float[] data)
     {
+        if (!isRecorderInitialized || !isRecording)
+        {
+            Debug.LogWarning("Audio recorder is not initialized or not recording");
+            return;
+        }
+
         short[] audioBuffer = AudioRecorderInterface.ReadAudioData();
+        if (audioBuffer == null)
+        {
+            Debug.LogError("AudioBuffer is null");
+            return;
+        }
+
         int samplesRead = audioBuffer.Length;
+        Debug.Log($"Samples read: {samplesRead}");
 
         if (samplesRead > 0)
         {
@@ -90,7 +106,15 @@ public class AudioManager : MonoBehaviour
 
     void OnDestroy()
     {
-        AudioRecorderInterface.StopRecording();
-        AudioRecorderInterface.Release();
+        if (isRecording)
+        {
+            AudioRecorderInterface.StopRecording();
+            isRecording = false;
+        }
+        if (isRecorderInitialized)
+        {
+            AudioRecorderInterface.Release();
+            isRecorderInitialized = false;
+        }
     }
 }
